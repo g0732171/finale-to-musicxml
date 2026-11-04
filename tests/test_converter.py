@@ -1,0 +1,72 @@
+from pathlib import Path
+import hashlib
+import sys
+import tempfile
+import unittest
+import xml.etree.ElementTree as ET
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'app'))
+import bootstrap
+from mus_compat import read_score, MusStructureError
+from conversion import convert, score_xml
+from finale_file_parser.errors import FinaleFileError
+from finale_file_parser.export.musicxml import to_musicxml
+from fixtures import fixture, modern_fixture
+
+
+class ConverterTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.root=Path(self.temp.name)
+        self.addCleanup(self.temp.cleanup)
+
+    def assert_notes(self,data):
+        source=self.root/'test.mus';source.write_bytes(data)
+        before=hashlib.sha256(data).digest()
+        score=read_score(source)
+        xml=ET.fromstring(to_musicxml(score))
+        notes=xml.findall('.//note[pitch]')
+        self.assertEqual(len(score.parts),1)
+        self.assertEqual(len(notes),4)
+        self.assertEqual([n.findtext('pitch/step') for n in notes],['C','D','E','F'])
+        self.assertEqual({n.findtext('voice') for n in notes},{'1','2','3','4'})
+        self.assertGreaterEqual(len(xml.findall('.//rest')),1)
+        self.assertEqual(hashlib.sha256(source.read_bytes()).digest(),before)
+        return score
+
+    def test_raw_layouts_and_byte_orders(self):
+        for order in ['big','little']:
+            for layout in ['etf','extended']:
+                with self.subTest(order=order,layout=layout):
+                    self.assert_notes(fixture(order,layout))
+
+    def test_malformed_active_music_and_unknown_models_are_rejected(self):
+        source=self.root/'bad.mus'
+        for order in ['big','little']:
+            for layout in ['etf','extended']:
+                for kind in ['missing','truncated','unverified']:
+                    with self.subTest(order=order,layout=layout,kind=kind):
+                        source.write_bytes(fixture(order,layout,kind))
+                        with self.assertRaises((MusStructureError,FinaleFileError)):
+                            read_score(source)
+
+    def test_compression_levels_and_banner_years(self):
+        expected=self.assert_notes(modern_fixture())
+        for year in [2000,2003,2006,2009,2011,2012]:
+            for level in [0,1,6,9]:
+                with self.subTest(year=year,level=level):
+                    self.assertEqual(self.assert_notes(modern_fixture(year,level)).parts,expected.parts)
+
+    def test_real_public_musx_in_isolated_worker(self):
+        source=ROOT/'tests/fixtures/triplet.musx'
+        self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(),
+                         'ab951d13a51461e67e8908c4dd603bb62aa64d1a18ce5f5856c8636f4c1d043b')
+        target=self.root/'triplet.mxl'
+        result=convert(source,target)
+        self.assertEqual(result['status'],'success',result)
+        self.assertEqual((result['parts'],result['measures'],result['notes']),(1,1,4))
+        self.assertEqual(ET.fromstring(score_xml(target)).tag,'score-partwise')
+
+
+if __name__=='__main__':unittest.main()

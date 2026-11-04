@@ -1,0 +1,31 @@
+:root { color-scheme: light; }
+.hero > * { min-width: 0; }
+.folder-main { margin-top: 22px; }
+.folder-info { border: 1px solid var(--line); background: #f5f7ef; padding: 14px; border-radius: 5px; margin-top: 14px; font-size: 11px; overflow-wrap: anywhere; }
+.folder-info strong { font-size: 13px; }
+.folder-info p { margin-top: 7px; color: #7a817a; }
+.secondary { margin-top: 12px; border: 1px solid #aabb9b; background: #fffefa; border-radius: 4px; color: var(--green); padding: 9px 12px; font-size: 11px; }
+.folder-help { font-size: 10px; line-height: 1.9; color: #8c957e; margin-top: 20px; }
+.save-status { font-size: 11px; color: var(--green); background: #f2f6eb; padding: 12px; border: 1px solid #dce5cf; border-radius: 4px; margin: 12px 0; overflow-wrap: anywhere; }
+.result-status.save-error { color: #ad7349; }
+#savedialog { width: min(550px, 94vw); padding: 30px; }
+.save-explanation, #save-dialog-message { font-size: 12px; line-height: 1.9; margin-top: 16px; }
+#save-dialog-message { color: #9a7c50; background: #f6f3e8; padding: 12px; border-radius: 4px; }
+.save-dialog-actions { display: flex; align-items: center; gap: 16px; margin-top: 24px; }
+.save-dialog-actions .secondary { margin-top: 0; flex-shrink: 0; }
+.build-info { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; color: #677b5b; font-size: 11px; }
+.build-info strong { padding: 3px 10px; border: 1px solid #a2b390; border-radius: 4px; font-size: 13px; background: #edf3e5; }
+.selection-status { font-size: 11px; line-height: 1.8; margin: 10px 0; color: var(--green); overflow-wrap: anywhere; }
+.path-label { display: block; font-size: 12px; font-weight: 600; margin: 22px 0 8px; }
+.path-input { display: block; width: 100%; padding: 13px 12px; border: 1px solid #aabb9b; border-radius: 5px; background: #fff; color: #273e37; font: 13px/1.6 Consolas, 'Yu Gothic', monospace; }
+.path-input:focus { outline: 2px solid #93ac7f; outline-offset: 2px; }
+.path-help { font-size: 10px; color: #858f79; margin-top: 8px; line-height: 1.8; }
+.output-path { font-size: 11px; background: #f2f5ec; margin-bottom: 18px; }
+#convertbutton { margin-top: 18px; }
+@media (max-width: 900px) {
+  .hero { grid-template-columns: 1fr; }
+  .hero-art { display: none; }
+  .workspace { grid-template-columns: 1fr; }
+  .results-panel { min-height: 400px; }
+  .next-section { grid-template-columns: 1fr; gap: 18px; }
+}

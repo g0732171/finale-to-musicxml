@@ -1,0 +1,35 @@
+Finale Archive offline distribution 0.6.2
+
+Python 3.12.16, PSF License, portable builds by astral-sh/python-build-standalone
+https://github.com/astral-sh/python-build-standalone/releases/tag/20261026
+Runtime license notices are retained in runtime/.
+
+musx2mxl 0.2.9, MIT
+https://github.com/joris-vaneyghen/musx2mxl
+
+finale-file-parser 0.4.0, MIT (with separately attributed third-party components)
+https://github.com/jsawruk/finale-file-parser
+Only the notation-reading and MusicXML-export modules are used. Its optional
+inspection-report renderer (Verovio) is not needed or included in this app.
+Its THIRD-PARTY-NOTICES and distribution license files are retained in deps/.
+Application mus_compat.py uses and adapts its MIT-licensed record decoders/text
+section handling, adding structural layouts and active-frame validation.
+
+lxml 6.0.2, BSD, with libxml2/libxslt components and their own notices
+https://lxml.de/
+
+defusedxml 0.7.1, PSF License
+https://github.com/tiran/defusedxml
+
+OpenSheetMusicDisplay 1.9.2, BSD-3-Clause
+https://github.com/opensheetmusicdisplay/opensheetmusicdisplay
+Bundled browser renderer. License retained in LICENSE-OSMD.txt.
+Other bundled dependency notices remain in the renderer and wheel distributions.
+
+All packaged wheels and runtime digests are recorded in BUILD-MANIFEST.json.
+No customer documents or sample scores are included.
+
+The source repository additionally includes a public test-only MUSX fixture from
+openmusx/musxdom (MIT, Copyright (c) 2025 Robert G. Patterson).
+Its commit, file hash and license are recorded in tests/fixtures/README.md and
+LICENSES/musxdom-MIT.txt. Tests and fixtures are excluded from application ZIPs.

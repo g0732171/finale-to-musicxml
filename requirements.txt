@@ -1,0 +1,6 @@
+# Install the explicitly tested converter dependencies with --no-deps.
+# Upstream GUI/report dependencies are not used by this application's core.
+musx2mxl==0.2.9
+finale-file-parser==0.4.0
+defusedxml==0.7.1
+lxml==6.0.2
