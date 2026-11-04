@@ -4,7 +4,8 @@ Finale Archive オフライン版 v0.6.2
 ZIP全体を展開してください。ZIP内から直接実行しないでください。
 Windows 10/11（64ビット）：Start-Windows.cmd をダブルクリック。
 macOS 11以降：Start-Mac.command をダブルクリック。
-Mac版にはApple SiliconとIntel両方の実行環境を同梱しています。
+Mac版はApple SiliconとIntelに対応しています。CPU別ZIPの場合は、ご利用のMacに合う方を選んでください。
+統合版ZIPには両方の実行環境を同梱しています。
 PythonやFinaleのインストール、インターネット接続は不要です。
 既定のブラウザに日本語の画面が開きます。
 Macの起動用ファイルはターミナルで実行されます。実行中は閉じず、画面の「終了」で終了してください。

@@ -19,7 +19,9 @@ It is an independent community project, not an official Finale/MakeMusic product
 
 The portable ZIPs include Python and their dependencies. End users do not need
 Python, Finale, a server, an account, or an Internet connection to convert scores.
-Mac builds include Apple Silicon and Intel runtimes. **Mac startup and native
+Mac downloads support Apple Silicon and Intel. If separate CPU-specific ZIPs are
+offered, choose the one matching your Mac. Universal builds contain both runtimes.
+**Mac startup and native
 pickers have not yet been verified on an actual Mac.**
 
 Results go into a new sibling folder named `<source>_変換済み`. Existing results
@@ -114,6 +116,8 @@ and are not part of public CI.
 ```sh
 python tools/bundle.py prepare
 python tools/bundle.py package
+# Optional smaller Mac downloads, one per CPU:
+python tools/make_mac_variants.py
 ```
 
 The builder downloads pinned standalone CPython runtimes and wheels, validates
