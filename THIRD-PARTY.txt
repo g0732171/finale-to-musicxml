@@ -11,7 +11,9 @@ finale-file-parser 0.4.0, MIT (with separately attributed third-party components
 https://github.com/jsawruk/finale-file-parser
 Only the notation-reading and MusicXML-export modules are used. Its optional
 inspection-report renderer (Verovio) is not needed or included in this app.
-Its THIRD-PARTY-NOTICES and distribution license files are retained in deps/.
+Its distribution license is retained in deps/. The upstream third-party notices,
+including Mark Adler's blast.c/zlib notice, are retained separately in
+LICENSES/finale-file-parser-NOTICES.md because the wheel omits that notice file.
 Application mus_compat.py uses and adapts its MIT-licensed record decoders/text
 section handling, adding structural layouts and active-frame validation.
 

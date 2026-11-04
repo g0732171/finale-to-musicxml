@@ -118,8 +118,8 @@ def package():
                 if file.is_file() and '__pycache__' not in file.parts and file.suffix!='.pyc':add_bytes(archive,prefix+file.relative_to(ROOT).as_posix(),file.read_bytes())
         for name in ['Start-Mac.command','README-ja.txt','THIRD-PARTY.txt','LICENSE','README.md','README.zh-CN.md']:
             add_bytes(archive,prefix+name,(ROOT/name).read_bytes(),0o755 if name.endswith('.command') else 0o644)
-        for file in (ROOT/'LICENSES').glob('*.txt'):
-            add_bytes(archive,prefix+'LICENSES/'+file.name,file.read_bytes())
+        for file in (ROOT/'LICENSES').iterdir():
+            if file.is_file():add_bytes(archive,prefix+'LICENSES/'+file.name,file.read_bytes())
         add_bytes(archive,prefix+'LICENSE-OSMD.txt',(CACHE/'LICENSE-OSMD.txt').read_bytes())
         for key in ['arm64','x86_64']:
             with tarfile.open(CACHE/(key+'.tar.gz')) as runtime:
