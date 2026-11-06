@@ -5,6 +5,7 @@ four layers; validate every active frame before pruning database history.
 Never rewrite inputs, guess missing entries, or remove a referenced bad frame.
 """
 from pathlib import Path
+import re
 import zlib
 from finale_file_parser.errors import FinaleFileError
 
@@ -177,7 +178,111 @@ def _texts(pools, fallback):
             continue
         seen.add(identity)
         result.append(Record(tag, attrs, decoder._decode(match.group(3), fallback), {}))
+    # Raw text numbers and TX record keys are separate spaces. Read the
+    # authoritative text pool only; never match names against a template palette.
+    for match in re.finditer(rb'\^block\((\d+)\)(.*?)\^end', pools[3].data, re.S):
+        number = match.group(1).decode('ascii')
+        identity = ('blockText', number)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        text = decoder._decode(match.group(2), fallback)
+        for command, symbol in [('flat','\u266d'),('sharp','\u266f'),('natural','\u266e')]:
+            text = text.replace('^'+command+'()', symbol)
+        result.append(Record('blockText', {'number':number}, text, {}))
     return tuple(result)
+
+
+def _row_labels(rows, frames):
+    """ETF IS -> TX -> raw block references, and the score's actual staff order."""
+    from dataclasses import replace
+    from finale_file_parser.enigma import mus_document as decoder
+    from finale_file_parser.enigma.document import Record
+    others = decoder._rows_others(rows, frames)
+    for index, record in enumerate(others):
+        if record.tag != 'staffSpec':
+            continue
+        raw = rows.others['IS', int(record.attrs['cmper'])].payload
+        if len(raw) < 34:
+            continue
+        fields = dict(record.fields)
+        for name, offset in [('fullName',30),('abbrvName',32)]:
+            number = int.from_bytes(raw[offset:offset+2], rows.byte_order)
+            if number:
+                fields[name] = str(number)
+        others[index] = replace(record, fields=fields)
+    for (tag, key), raw in rows.others.items():
+        # ETF documents four 12-byte incidences, textID at the first word.
+        if tag == 'TX' and key and len(raw.payload) == 48:
+            text_id = int.from_bytes(raw.payload[:2], rows.byte_order)
+            if text_id:
+                others.append(Record('textBlock', {'cmper':str(key)}, '', {'textID':str(text_id)}))
+    staff_ids = {int(r.attrs['cmper']) for r in others if r.tag == 'staffSpec'}
+    raw = rows.others.get(('Iu',0))
+    if raw and raw.payload and len(raw.payload)%24 == 0:
+        order = [int.from_bytes(raw.payload[i:i+2], rows.byte_order)
+                 for i in range(0,len(raw.payload),24)]
+        if len(set(order)) == len(order) and all(n > 0 and n in staff_ids for n in order):
+            others.extend(Record('instUsed', {'cmper':'0','inci':str(i)}, '', {'inst':str(n)})
+                          for i,n in enumerate(order))
+    return tuple(others)
+
+
+def _row_groups(rows):
+    """ETF NG fields, including names shared by a grand staff."""
+    from finale_file_parser.enigma.document import Record
+    result = []
+    for (tag, key, group), raw in rows.details.items():
+        if tag != 'NG' or len(raw.payload) not in (30,40):
+            continue
+        word = lambda offset: int.from_bytes(raw.payload[offset:offset+2], rows.byte_order)
+        fields = {'startInst':str(word(0)), 'endInst':str(word(2)),
+                  'bracket':Record('bracket', {}, '', {'id':str(word(10))})}
+        for name, offset in [('fullID',4),('abbrvID',22)]:
+            if word(offset):
+                fields[name] = str(word(offset))
+        if word(20)&0x0400:
+            fields['groupBarlineStyle'] = 'group'
+        result.append(Record('staffGroup', {'cmper1':str(key),'cmper2':str(group)}, '', fields))
+    return tuple(result)
+
+
+def _shared_staff_names(doc):
+    """Name otherwise unnamed staves from an explicit two-staff brace only."""
+    from dataclasses import replace
+    from finale_file_parser.enigma.document import OthersPool
+    from finale_file_parser.enigma.groups import staff_order
+    from finale_file_parser.enigma.text import staff_names, text_block, plain_text
+    order = staff_order(doc)
+    position = {staff:i for i,staff in enumerate(order)}
+    named = staff_names(doc)
+    candidates = {}
+    for group in doc.details.of_tag('staffGroup'):
+        if group.attrs.get('cmper1') != '0' or 'part' in group.attrs:
+            continue
+        fields = group.fields
+        bracket = fields.get('bracket')
+        if bracket is None or bracket.fields.get('id') != '3':
+            continue
+        start,end = int(fields['startInst']),int(fields['endInst'])
+        if start not in position or end not in position or position[end]-position[start] != 1:
+            continue
+        references = {name:fields[key] for name,key in [('fullName','fullID'),('abbrvName','abbrvID')]
+                      if key in fields}
+        if not any(plain_text(text_block(doc,int(n)) or '') for n in references.values()):
+            continue
+        for staff in order[position[start]:position[end]+1]:
+            candidates.setdefault(staff,[]).append(references)
+    records = []
+    for record in doc.others.records:
+        staff = int(record.attrs['cmper']) if record.tag == 'staffSpec' else None
+        labels = candidates.get(staff,[])
+        # Explicit individual names always win. Conflicting groups are not guessed.
+        if staff not in named and len(labels) == 1:
+            record = replace(record, fields={**record.fields,**labels[0]})
+        records.append(record)
+    doc.others = OthersPool(tuple(records))
+    return doc
 
 
 def _gfhold(raw, order, layout):
@@ -242,7 +347,7 @@ def _normalise(doc):
         raise MalformedScoreError('No musical entries placed in score')
     doc.entries = EntriesPool(tuple(e for e in doc.entries.records
                                     if int(e.attrs['entnum']) in places.by_entry))
-    return doc
+    return _shared_staff_names(doc)
 
 
 def _documents(path):
@@ -305,8 +410,9 @@ def _documents(path):
         try:
             doc = EnigmaDocument('mus',Pool(()),Pool(()),
                 OptionsPool(tuple(decoder._rows_options(rows))),
-                OthersPool(tuple(decoder._rows_others(rows,frames))),
-                DetailsPool(tuple(_gfhold(r,order,layout) for r in holds)),EntriesPool(entries),texts)
+                OthersPool(_row_labels(rows,frames)),
+                DetailsPool(tuple(_gfhold(r,order,layout) for r in holds)+_row_groups(rows)),
+                EntriesPool(entries),texts)
             yield _normalise(doc), kind, layout
         except (ValueError,KeyError,FinaleFileError) as error:
             failures.append(str(error))

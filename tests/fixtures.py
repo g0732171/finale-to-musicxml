@@ -93,3 +93,48 @@ def modern_fixture(year=2011,level=6,large_pool=None):
         stream=zlib.compress(data,level)
         output.append(u16(15+i,'little')+u32(len(stream)+10,'little')+bytes(4)+stream)
     return bytes(header)+b''.join(output)
+
+
+def named_fixture(order,layout,case='individual'):
+    """Two staves with deliberately unrelated staff/TX/raw-text numbers."""
+    raw=fixture(order,layout)
+    pools=[];position=512
+    for _ in range(4):
+        length=int.from_bytes(raw[position+2:position+6],order)
+        pools.append(raw[position+6:position+length]);position+=length
+    def rows(tag,key,payload,key2=None):
+        width=12 if key2 is None else 10
+        header=u16(key,order)+(u16(key2,order) if key2 is not None else b'')
+        header+=tag.encode() if order=='big' else tag[::-1].encode()
+        return b''.join(header+payload[i:i+width] for i in range(0,len(payload),width))
+    # Retain measures and frames, replace the original staff spec.
+    pools[0]=b''.join(pools[0][i:i+16] for i in range(0,len(pools[0]),16)
+                      if pools[0][i+2:i+4] != (b'IS' if order=='big' else b'SI'))
+    for staff,full,short in [(1,501,902),(2,777,778)]:
+        data=bytearray(36)
+        if case in {'individual','dangling'}:
+            data[30:32]=u16(full,order);data[32:34]=u16(short,order)
+        pools[0]+=rows('IS',staff,bytes(data))
+    for key,text_id in [(501,21),(902,9),(777,45),(778,48),(600,72),(601,73),(602,74)]:
+        if case=='missing':continue
+        if case=='dangling':text_id=999
+        pools[0]+=rows('TX',key,u16(text_id,order)+bytes(46))
+    # Two 24-byte staff slots: preserve an order different from numeric ids.
+    pools[0]+=rows('Iu',0,u16(2,order)+bytes(22)+u16(1,order)+bytes(22))
+    pools[1]=b''
+    base=4 if layout=='etf' else 6
+    percent_at=12 if layout=='etf' else 4
+    for staff in [1,2]:
+        gf=bytearray(20);gf[percent_at:percent_at+2]=u16(75,order)
+        for layer in range(4):
+            if layer%2 == staff-1:gf[base+2*layer:base+2*layer+2]=u16(1001+layer,order)
+        pools[1]+=rows('GF',staff,bytes(gf),1)
+    for group in ([1,2] if case=='ambiguous' else [1]):
+        ng=bytearray(40)
+        for offset,value in [(0,2),(2,1),(4,600 if group==1 else 602),(10,3),(20,0x0400),(22,601)]:
+            ng[offset:offset+2]=u16(value,order)
+        pools[1]+=rows('NG',0,bytes(ng),group)
+    texts={1:'Unused palette name',21:'Alpha ^flat()',9:'A.',45:'Beta',48:'B.',
+           72:'Shared instrument',73:'Shared',74:'Conflicting instrument'}
+    pools[3]=b''.join(f'^block({n})^font(Times)^size(12){s}^end'.encode() for n,s in texts.items())
+    return raw[:512]+b''.join(u16(i+1,order)+u32(len(p)+6,order)+p for i,p in enumerate(pools))

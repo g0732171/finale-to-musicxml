@@ -13,7 +13,7 @@ from mus_compat import read_score, MusStructureError, _inflate_zlib
 from conversion import convert, score_xml
 from finale_file_parser.errors import FinaleFileError
 from finale_file_parser.export.musicxml import to_musicxml
-from fixtures import fixture, modern_fixture
+from fixtures import fixture, modern_fixture, named_fixture
 
 
 class ConverterTests(unittest.TestCase):
@@ -94,6 +94,28 @@ class ConverterTests(unittest.TestCase):
         source=self.root/'truncated.mus'
         source.write_bytes(modern_fixture(large_pool=0)[:-2])
         with self.assertRaises(MusStructureError):read_score(source)
+
+    def test_names_follow_references_and_group_names(self):
+        source=self.root/'names.mus'
+        for order in ['big','little']:
+            for layout in ['etf','extended']:
+                for case in ['individual','shared','missing','dangling','ambiguous']:
+                    with self.subTest(order=order,layout=layout,case=case):
+                        source.write_bytes(named_fixture(order,layout,case))
+                        before=source.read_bytes()
+                        score=read_score(source)
+                        self.assertEqual([p.id for p in score.parts],['P2','P1'])
+                        names={p.id:p.name for p in score.parts}
+                        if case=='individual':self.assertEqual(names,{'P1':'Alpha \u266d','P2':'Beta'})
+                        elif case=='shared':self.assertEqual(set(names.values()),{'Shared instrument'})
+                        else:self.assertEqual(names,{'P1':'Staff 1','P2':'Staff 2'})
+                        if case not in {'missing','dangling'}:
+                            self.assertEqual(score.groups[0].name,'Shared instrument')
+                            self.assertEqual(score.groups[0].abbreviation,'Shared')
+                        xml=ET.fromstring(to_musicxml(score))
+                        self.assertEqual(len(xml.findall('.//note[pitch]')),4)
+                        self.assertNotIn('Unused palette name',names.values())
+                        self.assertEqual(source.read_bytes(),before)
 
 
 if __name__=='__main__':unittest.main()
