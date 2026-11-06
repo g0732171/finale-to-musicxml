@@ -63,38 +63,71 @@ def _inflate_zlib(data, budget):
     return bytes(output), len(data) - len(engine.unused_data)
 
 
+def _record_pool(data, module, header):
+    """Use upstream record decoders, but require complete tiling including padding."""
+    records = module._walk(data)
+    if records is None:
+        return None
+    position = 0
+    for record in records:
+        while position+2 <= len(data) and int.from_bytes(data[position:position+2],'little') in (0,65535):
+            position += 2
+        position += header+len(record.payload)+4+len(record.extra)
+    tail = data[position:]
+    if position > len(data) or len(tail)%2 or any(
+            int.from_bytes(tail[i:i+2],'little') not in (0,65535) for i in range(0,len(tail),2)):
+        return None
+    return records
+
+
+def _ordered_record_pools(pools):
+    """Resolve unique pool roles by records, not size, position or version banner."""
+    from finale_file_parser.enigma import mus_others, mus_details, mus_entries
+    roles = {'others':[], 'details':[], 'entries':[]}
+    for i,pool in enumerate(pools):
+        others = _record_pool(pool.data,mus_others,10)
+        if others and {146,176} <= {r.tag for r in others}:
+            roles['others'].append(i)
+        details = _record_pool(pool.data,mus_details,12)
+        if details and any(r.tag == mus_details.TAG_GFHOLD for r in details):
+            roles['details'].append(i)
+        compact = _compact_slots(pool.data,pool.byte_order)
+        if compact and mus_entries._looks_like_entry_pool(compact,pool.byte_order):
+            roles['entries'].append(i)
+    if any(len(v) != 1 for v in roles.values()):
+        raise MusStructureError('No unique MUS record pool roles')
+    selected = [roles[k][0] for k in ('others','details','entries')]
+    remaining = [i for i in range(4) if i not in selected]
+    if len(set(selected)) != 3 or len(remaining) != 1:
+        raise MusStructureError('Ambiguous MUS record pool roles')
+    return tuple(pools[i] for i in selected+remaining)
+
+
 def _zlib_pools(data):
     from finale_file_parser.enigma import mus_payload as payload
-    budget = payload.MAX_MUS_PAYLOAD
-    start = None
-    for position in range(512, len(data) - 1):
-        if not payload._is_zlib_header(data, position):
+    # A full four-pool chain plus unique musical record roles replaces the
+    # upstream 4096-byte first-stream heuristic. Tiny scores need no padding.
+    for start in range(512, len(data)-1):
+        if not payload._is_zlib_header(data,start):
             continue
         try:
-            first, _ = _inflate_zlib(data[position:], budget)
+            budget = payload.MAX_MUS_PAYLOAD
+            pools = []
+            position = start
+            for index in range(4):
+                decoded,used = _inflate_zlib(data[position:],budget)
+                pools.append(payload.MusPool(decoded,'little'))
+                budget -= len(decoded)
+                if index < 3:
+                    end = position+used
+                    position = next((p for p in (end+10,end)
+                                     if payload._is_zlib_header(data,p)),None)
+                    if position is None:
+                        raise MusStructureError('Incomplete MUS zlib pool chain')
+            return _ordered_record_pools(tuple(pools))
         except (zlib.error, MusStructureError):
             continue
-        if len(first) >= 4096:
-            start = position
-            break
-    if start is None:
-        raise MusStructureError('No complete MUS zlib pool chain')
-    pools = []
-    position = start
-    for index in range(4):
-        try:
-            decoded, used = _inflate_zlib(data[position:], budget)
-        except zlib.error as error:
-            raise MusStructureError('Invalid MUS zlib stream') from error
-        pools.append(payload.MusPool(decoded, 'little'))
-        budget -= len(decoded)
-        if index < 3:
-            end = position + used
-            position = next((p for p in (end + 10, end)
-                             if payload._is_zlib_header(data, p)), None)
-            if position is None:
-                raise MusStructureError('Incomplete MUS zlib pool chain')
-    return tuple(pools)
+    raise MusStructureError('No complete, structurally identified MUS zlib chain')
 
 
 def _pools(path):
@@ -121,10 +154,19 @@ def _pools(path):
         if len(found) == 4 and position == len(data):
             return tuple(found), 'raw-rows'
         raise MusStructureError('Malformed uncompressed MUS pool chain')
-    pools = payload.read_mus_pools(path)
-    if all(p.kind is not None for p in pools):
-        return pools, 'dcl-rows'
-    return _zlib_pools(data), 'zlib-records'
+    # Do not call read_mus_pools first: it applies the old size floor before
+    # this adapter can examine the record structure.
+    try:
+        return _zlib_pools(data), 'zlib-records'
+    except MusStructureError as zlib_error:
+        try:
+            pools = payload._dcl_pools(data)
+        except FinaleFileError:
+            raise zlib_error
+    if len(pools) != 4 or {p.kind for p in pools} != {15,16,17,18}:
+        raise MusStructureError('Unexpected labelled MUS pools')
+    labelled = {p.kind:p for p in pools}
+    return tuple(labelled[k] for k in (15,16,17,18)), 'dcl-rows'
 
 
 def _entries(pools):
@@ -285,7 +327,7 @@ def _shared_staff_names(doc):
     return doc
 
 
-def _gfhold(raw, order, layout):
+def _gfhold(raw, order, layout, legacy_discriminator=False):
     from finale_file_parser.enigma.document import Record
     # ETF rows: clef, flags, four frame ids, clef percentage. The extended
     # record puts the percentage before the frame array. Each is a known
@@ -298,10 +340,17 @@ def _gfhold(raw, order, layout):
         offsets, clef_at = (6,8,10,12), 0
     if any(raw.payload[14:]):
         raise MusStructureError('Unknown MUS frame-hold extension')
-    percent_at = 12 if layout == 'etf' else 4
-    percent = int.from_bytes(raw.payload[percent_at:percent_at+2], order)
-    if percent > 1000:
-        raise MusStructureError('Clef percentage is outside supported layout bounds')
+    # Clef display size is not a musical validity test. Layout selection is
+    # checked against every referenced frame and entry, without a percent cap.
+    if legacy_discriminator:
+        # Still an explicitly documented compatibility limitation, not a format
+        # maximum. Removing this discriminator from unresolved row variants can
+        # make a real 29-staff score also "validate" as a 1-staff fragment.
+        # Known zlib layouts do not use it. Do not claim oversized legacy-row
+        # clefs are supported until an independent layout discriminator exists.
+        percent_at = 12 if layout == 'etf' else 4
+        if int.from_bytes(raw.payload[percent_at:percent_at+2],order) > 1000:
+            raise MusStructureError('Unresolved legacy-row layout discriminator')
     fields = {'clefID':str(int.from_bytes(raw.payload[clef_at:clef_at+2], order))}
     for layer, offset in enumerate(offsets, 1):
         frame = int.from_bytes(raw.payload[offset:offset+2], order)
@@ -362,8 +411,8 @@ def _documents(path):
     if kind == 'zlib-records':
         # Reuse the corrected, bounded pool decode throughout the document.
         # The upstream path readers would inflate it again with the old offset.
-        others = mus_others._walk(pools[0].data)
-        raw_details = mus_details._walk(pools[1].data)
+        others = _record_pool(pools[0].data,mus_others,10)
+        raw_details = _record_pool(pools[1].data,mus_details,12)
         if others is None or raw_details is None:
             raise MusStructureError('Malformed MUS record pools')
         options = decoder._options_records(others, decoder._banner_year(path))
@@ -411,7 +460,7 @@ def _documents(path):
             doc = EnigmaDocument('mus',Pool(()),Pool(()),
                 OptionsPool(tuple(decoder._rows_options(rows))),
                 OthersPool(_row_labels(rows,frames)),
-                DetailsPool(tuple(_gfhold(r,order,layout) for r in holds)+_row_groups(rows)),
+                DetailsPool(tuple(_gfhold(r,order,layout,legacy_discriminator=True) for r in holds)+_row_groups(rows)),
                 EntriesPool(entries),texts)
             yield _normalise(doc), kind, layout
         except (ValueError,KeyError,FinaleFileError) as error:

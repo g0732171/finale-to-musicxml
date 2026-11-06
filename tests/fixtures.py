@@ -55,7 +55,7 @@ def fixture(order,layout,broken=None):
     return bytes(header)+b''.join(u16(i+1,order)+u32(len(p)+6,order)+p for i,p in enumerate(pools))
 
 
-def modern_fixture(year=2011,level=6,large_pool=None):
+def modern_fixture(year=2011,level=6,large_pool=None,filler=True,pool_order=None,clef_percent=75):
     """One known four-layer score in a zlib-record container."""
     raw=fixture('little','extended')
     pools=[];position=512
@@ -68,13 +68,13 @@ def modern_fixture(year=2011,level=6,large_pool=None):
         return u16(tag,'little')+u16(staff,'little')+u16(measure,'little')+bytes(2)+u32(len(payload),'little')+payload+bytes(4)
     # Ordinary unknown option records keep the first pool above the upstream
     # zlib recognizer's minimum, without borrowing a real score's settings.
-    others=b''.join(other(tag,65534,bytes(64)) for tag in range(1,91))
+    others=b''.join(other(tag,65534,bytes(64)) for tag in range(1,91)) if filler else b''
     others+=other(176,1,b''.join(u16(n,'little') for n in [600,0,4,1024,0,16]))
     others+=other(231,1,bytes(36))
     others+=other(159,0,u16(1,'little')+bytes(22))
     for layer in range(1,5):
         others+=other(146,1000+layer,u32(layer,'little')+u32(5 if layer==1 else layer,'little')+bytes(4))
-    gf=bytearray(20);gf[4:6]=u16(75,'little')
+    gf=bytearray(20);gf[4:6]=u16(clef_percent,'little')
     for i in range(4):gf[6+2*i:8+2*i]=u16(1001+i,'little')
     details=b''.join(detail(2000+i,i+1,0,bytes(8)) for i in range(60))
     details+=detail(1044,1,1,bytes(gf))
@@ -89,7 +89,8 @@ def modern_fixture(year=2011,level=6,large_pool=None):
         elif large_pool==1:decoded[1]+=detail(5000,0,0,bytes(600000))+detail(5000,1,0,bytes(600000))
         elif large_pool==2:decoded[2]+=(u32(9999,'little')+bytes(34))*32000
         elif large_pool==3:decoded[3]+=b'x'*1200000
-    for i,data in enumerate(decoded):
+    for i in (pool_order if pool_order is not None else range(4)):
+        data=decoded[i]
         stream=zlib.compress(data,level)
         output.append(u16(15+i,'little')+u32(len(stream)+10,'little')+bytes(4)+stream)
     return bytes(header)+b''.join(output)

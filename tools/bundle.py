@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CACHE = ROOT / '.build-cache'
 CACHE.mkdir(exist_ok=True)
 RUNTIME_RELEASE = '20261026'
-VERSION = '0.6.4'
+VERSION = '0.6.5'
 RUNTIMES = {
     'windows': ('x86_64-pc-windows-msvc', '1f2ab53880fc67ea323398c6388e05af28addc99a8e389209f08a51fdff4b149'),
     'arm64': ('aarch64-apple-darwin', '353d5f1b4fd2715e7053f12f068435d5bbad16b91e057006b5d01e0925709a7e'),

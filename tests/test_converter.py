@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 import zlib
+import itertools
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'app'))
@@ -116,6 +117,32 @@ class ConverterTests(unittest.TestCase):
                         self.assertEqual(len(xml.findall('.//note[pitch]')),4)
                         self.assertNotIn('Unused palette name',names.values())
                         self.assertEqual(source.read_bytes(),before)
+
+    def test_small_framed_pools_and_pool_order(self):
+        expected=self.assert_notes(modern_fixture())
+        for order in itertools.permutations(range(4)):
+            with self.subTest(order=order):
+                self.assertEqual(self.assert_notes(modern_fixture(filler=False,pool_order=order)).parts,
+                                 expected.parts)
+
+    def test_clef_display_size_does_not_reject_music(self):
+        for percent in [0,1,100,1001,2000,65535]:
+            with self.subTest(percent=percent):
+                self.assert_notes(modern_fixture(clef_percent=percent))
+
+    def test_unparsed_record_bytes_cannot_look_like_a_complete_score(self):
+        raw=modern_fixture();position=512;pools=[]
+        for _ in range(4):
+            length=int.from_bytes(raw[position+2:position+6],'little')
+            pools.append(zlib.decompress(raw[position+10:position+length]));position+=length
+        for index in [0,1]:
+            bad=list(pools);bad[index]+=b'\x01'
+            encoded=[]
+            for i,data in enumerate(bad):
+                stream=zlib.compress(data)
+                encoded.append((15+i).to_bytes(2,'little')+(len(stream)+10).to_bytes(4,'little')+bytes(4)+stream)
+            source=self.root/'truncated-record.mus';source.write_bytes(raw[:512]+b''.join(encoded))
+            with self.subTest(pool=index),self.assertRaises(MusStructureError):read_score(source)
 
 
 if __name__=='__main__':unittest.main()
