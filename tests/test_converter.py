@@ -4,11 +4,12 @@ import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+import zlib
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'app'))
 import bootstrap
-from mus_compat import read_score, MusStructureError
+from mus_compat import read_score, MusStructureError, _inflate_zlib
 from conversion import convert, score_xml
 from finale_file_parser.errors import FinaleFileError
 from finale_file_parser.export.musicxml import to_musicxml
@@ -67,6 +68,32 @@ class ConverterTests(unittest.TestCase):
         self.assertEqual(result['status'],'success',result)
         self.assertEqual((result['parts'],result['measures'],result['notes']),(1,1,4))
         self.assertEqual(ET.fromstring(score_xml(target)).tag,'score-partwise')
+
+    def test_large_pools_keep_all_four_layers(self):
+        expected=self.assert_notes(modern_fixture())
+        for pool in range(4):
+            for level in [0,1,6,9]:
+                with self.subTest(pool=pool,level=level):
+                    self.assertEqual(self.assert_notes(modern_fixture(level=level,large_pool=pool)).parts,
+                                     expected.parts)
+
+    def test_inflation_extent_eof_and_budget(self):
+        for size in [(1<<20)-1,1<<20,(1<<20)+1,(2<<20)+1]:
+            data=b'a'*size
+            stream=zlib.compress(data)
+            trailing=zlib.compress(b'next pool')+b'metadata'
+            with self.subTest(size=size):
+                self.assertEqual(_inflate_zlib(stream+trailing,size),(data,len(stream)))
+                with self.assertRaises(MusStructureError):
+                    _inflate_zlib(stream,size-1)
+                for cut in [1,4,8]:
+                    with self.assertRaises(MusStructureError):
+                        _inflate_zlib(stream[:-cut],size)
+
+    def test_incomplete_last_pool_is_rejected(self):
+        source=self.root/'truncated.mus'
+        source.write_bytes(modern_fixture(large_pool=0)[:-2])
+        with self.assertRaises(MusStructureError):read_score(source)
 
 
 if __name__=='__main__':unittest.main()

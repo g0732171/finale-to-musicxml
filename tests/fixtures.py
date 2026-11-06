@@ -55,7 +55,7 @@ def fixture(order,layout,broken=None):
     return bytes(header)+b''.join(u16(i+1,order)+u32(len(p)+6,order)+p for i,p in enumerate(pools))
 
 
-def modern_fixture(year=2011,level=6):
+def modern_fixture(year=2011,level=6,large_pool=None):
     """One known four-layer score in a zlib-record container."""
     raw=fixture('little','extended')
     pools=[];position=512
@@ -81,7 +81,15 @@ def modern_fixture(year=2011,level=6):
     header=bytearray(512);header[:18]=b'ENIGMA BINARY FILE'
     banner=f'Finale(R) {year} Test'.encode();header[32:32+len(banner)]=banner
     output=[]
-    for i,data in enumerate([others,details,pools[2],pools[3]]):
+    decoded=[others,details,pools[2],pools[3]]
+    if large_pool is not None:
+        # Specified, non-musical records exercise multi-chunk inflation without
+        # redistributing any external score or changing the expected music.
+        if large_pool==0:decoded[0]+=other(5000,0,bytes(600000))+other(5000,1,bytes(600000))
+        elif large_pool==1:decoded[1]+=detail(5000,0,0,bytes(600000))+detail(5000,1,0,bytes(600000))
+        elif large_pool==2:decoded[2]+=(u32(9999,'little')+bytes(34))*32000
+        elif large_pool==3:decoded[3]+=b'x'*1200000
+    for i,data in enumerate(decoded):
         stream=zlib.compress(data,level)
         output.append(u16(15+i,'little')+u32(len(stream)+10,'little')+bytes(4)+stream)
     return bytes(header)+b''.join(output)

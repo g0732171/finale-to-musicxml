@@ -24,7 +24,7 @@ from urllib.parse import parse_qs,unquote,urlsplit,quote
 from conversion import convert,is_music,score_xml
 from native_picker import choose
 
-VERSION='0.6.2'
+VERSION='0.6.3'
 ROOT=bootstrap.ROOT
 WEB=ROOT/'web'
 REASONS={'changed':'確認後に原本が変更されました。もう一度選択してください。','conversion_error':'この形式・内容を読み取れませんでした。','mus_variant':'このMUSの世代・構造は現在読み取れません。FinaleでMUSXとして保存するか、MusicXMLへ書き出してください。','too_large':'1ファイル20 MBまでです。','timeout':'処理時間の上限に達しました。','save_error':'保存先への書き込みに失敗しました。'}

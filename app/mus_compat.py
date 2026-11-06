@@ -5,6 +5,7 @@ four layers; validate every active frame before pruning database history.
 Never rewrite inputs, guess missing entries, or remove a referenced bad frame.
 """
 from pathlib import Path
+import zlib
 from finale_file_parser.errors import FinaleFileError
 
 
@@ -41,6 +42,60 @@ class MusStructureError(ValueError):
     pass
 
 
+def _inflate_zlib(data, budget):
+    """Inflate exactly one complete stream and report its true input extent."""
+    engine = zlib.decompressobj()
+    output = bytearray()
+    pending = data
+    while not engine.eof:
+        chunk = engine.decompress(pending, min(1 << 20, budget - len(output) + 1))
+        output.extend(chunk)
+        if len(output) > budget:
+            raise MusStructureError('MUS inflation limit exceeded')
+        # After EOF unconsumed_tail may still contain the following pools.
+        # Feeding it back duplicates unused_data and corrupts the input offset.
+        if engine.eof:
+            break
+        pending = engine.unconsumed_tail
+        if not pending and not chunk:
+            raise MusStructureError('Incomplete MUS zlib stream')
+    return bytes(output), len(data) - len(engine.unused_data)
+
+
+def _zlib_pools(data):
+    from finale_file_parser.enigma import mus_payload as payload
+    budget = payload.MAX_MUS_PAYLOAD
+    start = None
+    for position in range(512, len(data) - 1):
+        if not payload._is_zlib_header(data, position):
+            continue
+        try:
+            first, _ = _inflate_zlib(data[position:], budget)
+        except (zlib.error, MusStructureError):
+            continue
+        if len(first) >= 4096:
+            start = position
+            break
+    if start is None:
+        raise MusStructureError('No complete MUS zlib pool chain')
+    pools = []
+    position = start
+    for index in range(4):
+        try:
+            decoded, used = _inflate_zlib(data[position:], budget)
+        except zlib.error as error:
+            raise MusStructureError('Invalid MUS zlib stream') from error
+        pools.append(payload.MusPool(decoded, 'little'))
+        budget -= len(decoded)
+        if index < 3:
+            end = position + used
+            position = next((p for p in (end + 10, end)
+                             if payload._is_zlib_header(data, p)), None)
+            if position is None:
+                raise MusStructureError('Incomplete MUS zlib pool chain')
+    return tuple(pools)
+
+
 def _pools(path):
     from finale_file_parser.enigma import mus_payload as payload
     data = Path(path).read_bytes()
@@ -66,7 +121,9 @@ def _pools(path):
             return tuple(found), 'raw-rows'
         raise MusStructureError('Malformed uncompressed MUS pool chain')
     pools = payload.read_mus_pools(path)
-    return pools, 'dcl-rows' if all(p.kind is not None for p in pools) else 'zlib-records'
+    if all(p.kind is not None for p in pools):
+        return pools, 'dcl-rows'
+    return _zlib_pools(data), 'zlib-records'
 
 
 def _entries(pools):
@@ -198,8 +255,12 @@ def _documents(path):
     fallback = decoder._FALLBACK_ENCODING.get(decoder._banner_platform(path) or '', 'cp1252')
     texts = TextsPool(_texts(pools, fallback))
     if kind == 'zlib-records':
-        others = mus_others.read_mus_others(path)
-        raw_details = mus_details.read_mus_details(path)
+        # Reuse the corrected, bounded pool decode throughout the document.
+        # The upstream path readers would inflate it again with the old offset.
+        others = mus_others._walk(pools[0].data)
+        raw_details = mus_details._walk(pools[1].data)
+        if others is None or raw_details is None:
+            raise MusStructureError('Malformed MUS record pools')
         options = decoder._options_records(others, decoder._banner_year(path))
         # Older zlib banners use the same 18-byte clef definitions. Accept an
         # unambiguous known width, rather than dropping all their clefs.
